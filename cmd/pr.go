@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -15,17 +16,64 @@ import (
 var prCmd = &cobra.Command{
 	Use:   "pr",
 	Short: "Generate Pull Request Description",
-	Run: func(cmd *cobra.Command, args []string) {
-		diffCmd := exec.Command("ls", "-l")
-		// get the output from the command execution
-		diff, err := diffCmd.CombinedOutput()
-		if err != nil {
-			log.Fatalf("cmd.Run() failed with %s\n", err)
-		}
+	Run:   runPrCmd,
+}
 
-		fmt.Println(`Help me generate PR description for the below git diff:
+func init() {
+	rootCmd.AddCommand(prCmd)
+}
+
+func runPrCmd(cmd *cobra.Command, args []string) {
+	defaultBranch, err := getDefaultBranch()
+	if err != nil {
+		log.Fatalf("Failed to determine default branch: %v\n", err)
+	}
+
+	diff, err := getGitDiff(defaultBranch)
+	if err != nil {
+		log.Fatalf("Failed to get git diff: %v\n", err)
+	}
+
+	printPRDescription(diff)
+}
+
+func getDefaultBranch() (string, error) {
+	gbCmd := exec.Command("git", "branch")
+
+	output, err := gbCmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to run git branch: %v", err)
+	}
+
+	branches := strings.Split(string(output), "\n")
+
+	for _, branch := range branches {
+		branch = strings.TrimSpace(branch)
+		if branch == "main" {
+			return "main", nil
+		} else if branch == "master" {
+			return "master", nil
+		}
+	}
+
+	return "", fmt.Errorf("no main or master branch found")
+}
+
+func getGitDiff(defaultBranch string) (string, error) {
+	diffCmd := exec.Command("git", "diff", defaultBranch)
+
+	diff, err := diffCmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to run git diff: %v", err)
+	}
+
+	return string(diff), nil
+}
+
+func printPRDescription(diff string) {
+	fmt.Println(`Help me generate PR description for the below git diff:
 <diff>
-` + string(diff) + `</diff>
+` + diff + `</diff>
 
 Note that the format of the PR should follow this one:` + "```" + `
 ## Description
@@ -49,19 +97,4 @@ This Pull Request introduces several key functionalities aimed at enhancing the 
 - [429 - As a user, I can sign up for Control Center using email and password](https://www.pivotaltracker.com/story/show/187954429)
 - [451 - Restrict CC access until SMS verification is completed](https://www.pivotaltracker.com/story/show/187975451)
 ` + "```")
-	},
-}
-
-func init() {
-	rootCmd.AddCommand(prCmd)
-
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// prCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// prCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }
