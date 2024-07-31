@@ -22,14 +22,6 @@ type Story struct {
 	Desc string `json:"description"`
 }
 
-func (s Story) Title() string {
-	return s.Name
-}
-
-func (s Story) Description() string {
-	return s.Desc
-}
-
 func (s Story) FilterValue() string {
 	return s.Name
 }
@@ -72,30 +64,24 @@ var pickStoryCmd = &cobra.Command{
 			log.Fatalf("Failed to unmarshal response: %v", err)
 		}
 
-		options := make([]huh.Option[int], len(stories))
+		myOptions := make([]huh.Option[string], len(stories))
 
-		for _, story := range stories {
-			options = append(options, huh.Option{})
+		for i, story := range stories {
+			myOptions[i] = huh.NewOption(story.Name, story.Desc)
 		}
 
-		var toppings int
-
+		var toppings string
 		form := huh.NewForm(
 			huh.NewGroup(
-
-				huh.NewSelect[int]().
-					Title("Pick a country.").
-					Options(options...).
+				huh.NewSelect[string]().
+					Title("Pick a story.").
+					Options(myOptions...).
 					Value(&toppings),
 			),
 		)
-		// for _, story := range stories {
-		// 	fmt.Printf("Story ID: %d, Name: %s\n", story.ID, story.Name)
-		// }
-
 		form.Run()
-
 		fmt.Print(toppings)
+
 	},
 }
 
