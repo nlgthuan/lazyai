@@ -19,17 +19,23 @@ var prCmd = &cobra.Command{
 	Run:   runPrCmd,
 }
 
+var baseBranch string
+
 func init() {
 	rootCmd.AddCommand(prCmd)
+	prCmd.Flags().StringVarP(&baseBranch, "base", "b", "", "Base branch for git diff")
 }
 
 func runPrCmd(cmd *cobra.Command, args []string) {
-	defaultBranch, err := getDefaultBranch()
-	if err != nil {
-		log.Fatalf("Failed to determine default branch: %v\n", err)
+	if baseBranch == "" {
+		var err error
+		baseBranch, err = getDefaultBranch()
+		if err != nil {
+			log.Fatalf("Failed to determine default branch: %v\n", err)
+		}
 	}
 
-	diff, err := getGitDiff(defaultBranch)
+	diff, err := getGitDiff(baseBranch)
 	if err != nil {
 		log.Fatalf("Failed to get git diff: %v\n", err)
 	}
@@ -59,8 +65,8 @@ func getDefaultBranch() (string, error) {
 	return "", fmt.Errorf("no main or master branch found")
 }
 
-func getGitDiff(defaultBranch string) (string, error) {
-	diffCmd := exec.Command("git", "diff", defaultBranch)
+func getGitDiff(baseBranch string) (string, error) {
+	diffCmd := exec.Command("git", "diff", baseBranch)
 
 	diff, err := diffCmd.CombinedOutput()
 	if err != nil {
