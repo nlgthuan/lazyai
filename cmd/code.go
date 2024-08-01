@@ -22,7 +22,7 @@ var codeCmd = &cobra.Command{
 	Short: "Generate prompt to ask LLM to implement new features",
 	Long: `Generate prompt for code. For example:
 
-git ls-files | tail -n +1 | lazyai code`,
+git ls-files | fzf -m | xargs tail -n +1 | lazyai code`,
 	Run: generateCode,
 }
 
