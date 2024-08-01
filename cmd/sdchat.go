@@ -45,11 +45,21 @@ func init() {
 var sdchatCmd = &cobra.Command{
 	Use:   "sdchat",
 	Short: "Send a message and get a streaming response from the server",
-	Long: `
-    skydeck:
-        workspace: <workspace name, default: eastailge>
-        accessToken: <your access token>
-        refreshToken: <your refresh token>
+	Long: `Configuration:
+The command requires an access token and a refresh token to authenticate with the SkyDeck API.
+These tokens should be specified in the ~/.lazyai.yml configuration file under the 'skydeck' section:
+
+skydeck:
+    accessToken: <your access token>
+    refreshToken: <your refresh token>
+
+Examples:
+    # Send a message to the SkyDeck AI service
+    sdchat "Hello, SkyDeck!"
+
+    # Send a message to a specific conversation
+    sdchat -c 123 "Continue our previous conversation."
+
 `,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		home, err := os.UserHomeDir()
@@ -157,6 +167,23 @@ func sendMessage(payload SendMessagePayload, access, refresh string) (*SendMessa
 	}
 	defer resp.Body.Close()
 
+	// If the status code is 401 Unauthorized, refresh the tokens and retry
+	if resp.StatusCode == http.StatusUnauthorized {
+		fmt.Println("Refreshing token....")
+		access, err = refreshTokens(refresh)
+		if err != nil {
+			return nil, fmt.Errorf("error refreshing tokens: %v", err)
+		}
+
+		// Retry the request with new tokens
+		req.AddCookie(&http.Cookie{Name: "eastagile_access", Value: access})
+		resp, err = client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+	}
+
 	// Check if the status code is not 200 OK
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -197,6 +224,23 @@ func getStreamingResponse(messageID int, access, refresh string) error {
 	}
 	defer resp.Body.Close()
 
+	// If the status code is 401 Unauthorized, refresh the tokens and retry
+	if resp.StatusCode == http.StatusUnauthorized {
+		fmt.Println("Refreshing token....")
+		access, err = refreshTokens(refresh)
+		if err != nil {
+			return fmt.Errorf("error refreshing tokens: %v", err)
+		}
+
+		// Retry the request with new tokens
+		req.AddCookie(&http.Cookie{Name: "eastagile_access", Value: access})
+		resp, err = client.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+	}
+
 	// Check if the status code is not 200 OK
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -206,4 +250,43 @@ func getStreamingResponse(messageID int, access, refresh string) error {
 	// Stream the response
 	_, err = io.Copy(os.Stdout, resp.Body)
 	return err
+}
+
+func refreshTokens(currentRefreshToken string) (string, error) {
+	url := BaseURL + "/api/v1/authentication/token/refresh/"
+	client := &http.Client{}
+
+	req, err := http.NewRequest(http.MethodPost, url, nil)
+	if err != nil {
+		return "", err
+	}
+
+	req.AddCookie(&http.Cookie{Name: "eastagile_refresh", Value: currentRefreshToken})
+	req.Header.Set("Referer", ReferrerURL)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("received non-200 response code: %d, body: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var newAccess string
+	for _, cookie := range resp.Cookies() {
+		if cookie.Name == "eastagile_access" {
+			newAccess = cookie.Value
+		}
+	}
+
+	// Update the tokens in the configuration
+	viper.Set("skydeck.accessToken", newAccess)
+	if err := viper.WriteConfig(); err != nil {
+		return "", fmt.Errorf("error writing config file: %v", err)
+	}
+
+	return newAccess, nil
 }
