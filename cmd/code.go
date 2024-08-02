@@ -28,7 +28,7 @@ git ls-files | fzf -m | xargs tail -n +1 | lazyai code`,
 
 func init() {
 	codeCmd.Flags().StringVarP(&codeFile, "code", "c", "", "File containing the code to read")
-	codeCmd.Flags().StringVarP(&requirement, "requirement", "r", "", "User story requirement")
+	codeCmd.Flags().StringVarP(&requirement, "requirement", "r", "", "Task requirement")
 	rootCmd.AddCommand(codeCmd)
 }
 
@@ -55,20 +55,20 @@ func generateCode(cmd *cobra.Command, args []string) {
 		fmt.Fprintln(os.Stderr, "Reading input:", err)
 	}
 
-	fmt.Println(`I'm working on this Pivotal Tracker story:
+	fmt.Println(`I'm working on the task below:
 
-<User Story>
+<Task requirement>
 ` + requirement + `
-</User Story>
+</Task requirement>
 
-I will provide you my current source code. Please help me implement this story.
+Below is the relavant source code that I have in my repo:
 
 <Current Code>
 ` + codeBlock +
-`</Current Code>
+		`</Current Code>
 
 **General Instructions:**
-1. Let's implement the story step by step. I will need to adjust your solution along the way.
+1. Let's implement the task step by step. I will need to adjust your solution along the way.
 2. Ensure the output is production-ready quality code that is clean, optimized, and maintainable.
 3. The code should follow best practices and adhere to the project's coding standards.
 4. Please present each code change in two formats:
