@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"os"
+	"os/exec"
+	"runtime"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -40,6 +42,7 @@ type SendMessageResponse struct {
 func init() {
 	rootCmd.AddCommand(sdchatCmd)
 	sdchatCmd.Flags().IntP("conversation", "c", 0, "Conversation ID to use for the message")
+	sdchatCmd.Flags().BoolP("open", "o", false, "Open the conversation in the default browser instead of streaming the response to the terminal")
 }
 
 var sdchatCmd = &cobra.Command{
@@ -60,6 +63,8 @@ Examples:
     # Send a message to a specific conversation
     sdchat -c 123 "Continue our previous conversation."
 
+    # Send a message and open the conversation in the default browser
+    sdchat -o "Hello, SkyDeck!"
 `,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		home, err := os.UserHomeDir()
@@ -91,6 +96,7 @@ Examples:
 		accessToken, _ := cmd.Flags().GetString("accessToken")
 		refreshToken, _ := cmd.Flags().GetString("refreshToken")
 		conversationID, _ := cmd.Flags().GetInt("conversation")
+		openInBrowser, _ := cmd.Flags().GetBool("open")
 
 		if len(args) < 1 {
 			fmt.Println("Please provide a message to send")
@@ -118,13 +124,6 @@ Examples:
 			return
 		}
 
-		// Get streaming response
-		err = getStreamingResponse(resp.Data.AssistantMessageID, accessToken, refreshToken)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error getting streaming response: %v\n", err)
-			return
-		}
-
 		convoID := 0
 		if conversationID != 0 {
 			convoID = conversationID
@@ -132,8 +131,40 @@ Examples:
 			convoID = resp.Data.ConversationID
 		}
 
-		fmt.Printf("\nVisit the conversation at: https://eastagile.skydeck.ai/conversations/%d", convoID)
+		conversationURL := fmt.Sprintf("https://eastagile.skydeck.ai/conversations/%d", convoID)
+
+		if openInBrowser {
+			if err := openURL(conversationURL); err != nil {
+				fmt.Fprintf(os.Stderr, "Error opening URL: %v\n", err)
+			}
+		} else {
+			// Get streaming response
+			err = getStreamingResponse(resp.Data.AssistantMessageID, accessToken, refreshToken)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error getting streaming response: %v\n", err)
+				return
+			}
+
+			fmt.Printf("\nVisit the conversation at: %s", conversationURL)
+		}
 	},
+}
+
+func openURL(url string) error {
+	var err error
+
+	switch runtime.GOOS {
+	case "linux":
+		err = exec.Command("xdg-open", url).Start()
+	case "windows":
+		err = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	case "darwin":
+		err = exec.Command("open", url).Start()
+	default:
+		err = fmt.Errorf("unsupported platform")
+	}
+
+	return err
 }
 
 func sendMessage(payload SendMessagePayload, access, refresh string) (*SendMessageResponse, error) {
