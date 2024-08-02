@@ -63,8 +63,9 @@ func generateCode(cmd *cobra.Command, args []string) {
 
 I will provide you my current source code. Please help me implement this story.
 
-<Current Code>` + codeBlock +
-		`</Current Code>
+<Current Code>
+` + codeBlock +
+`</Current Code>
 
 **General Instructions:**
 1. Let's implement the story step by step. I will need to adjust your solution along the way.

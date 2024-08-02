@@ -124,6 +124,15 @@ Examples:
 			fmt.Fprintf(os.Stderr, "Error getting streaming response: %v\n", err)
 			return
 		}
+
+		convoID := 0
+		if conversationID != 0 {
+			convoID = conversationID
+		} else {
+			convoID = resp.Data.ConversationID
+		}
+
+		fmt.Printf("\nVisit the conversation at: https://eastagile.skydeck.ai/conversations/%d", convoID)
 	},
 }
 
@@ -249,6 +258,7 @@ func getStreamingResponse(messageID int, access, refresh string) error {
 
 	// Stream the response
 	_, err = io.Copy(os.Stdout, resp.Body)
+
 	return err
 }
 
