@@ -18,9 +18,9 @@ var (
 
 // codeCmd represents the code command
 var codeCmd = &cobra.Command{
-	Use:   "code",
-	Short: "Generate prompt to ask LLM to implement new features",
-	Long: `Generate prompt for code. For example:
+    Use:   "code",
+    Short: "Generate a prompt to ask an LLM to implement new features based on given code",
+    Long: `Generate a prompt for code implementation. For example:
 
 git ls-files | fzf -m | xargs tail -n +1 | lazyai code`,
 	Run: generateCode,

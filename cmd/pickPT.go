@@ -30,16 +30,19 @@ func (s Story) FilterValue() string {
 // pickPTCmd represents the pickPT command
 var pickPTCmd = &cobra.Command{
 	Use:   "pickPT",
-	Short: "Filter Pivotal Tracker story you are working on (started) and return its description",
-	Long: `Filter Pivotal Tracker story you are working on (started) and return its description.
+	Short: "Retrieve the description of your active Pivotal Tracker story",
+	Long: `The pickPT command helps you quickly find the Pivotal Tracker story you are currently working on (in 'started' state) and returns its description.
+This command streamlines your workflow by providing instant access to essential story details.
 
-Please make sure that ~/.lazyai.yml is configured correctly with
+Configuration:
+Ensure your configuration file (~/.lazyai.yml) is set up properly with the following details:
 
     pivotalTracker:
         apiToken: <your_api_token>
         projectID: <project_ID>
-        owner: <your account name, e.g. thuanngo>
+        owner: <your_account_name, e.g. thuanngo>
 `,
+
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		home, err := os.UserHomeDir()
 		if err != nil {

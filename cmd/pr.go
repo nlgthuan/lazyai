@@ -1,6 +1,3 @@
-/*
-Copyright © 2024 NAME HERE <EMAIL ADDRESS>
-*/
 package cmd
 
 import (
@@ -15,8 +12,15 @@ import (
 // prCmd represents the pr command
 var prCmd = &cobra.Command{
 	Use:   "pr",
-	Short: "Generate Pull Request Description",
-	Run:   runPrCmd,
+	Short: "Generate a prompt for Pull Request description based on git diff",
+	Long: `The 'pr' command generates a detailed Pull Request description by analyzing the differences between your current branch and a specified base branch.
+
+Configuration:
+Ensure your git repository has a main or master branch, or specify a different base branch using the --base flag.
+
+This command is designed to be used in conjunction with other commands that can process the generated description. For example:
+    lazyai pr | lazyai sdchat`,
+	Run: runPrCmd,
 }
 
 var baseBranch string
