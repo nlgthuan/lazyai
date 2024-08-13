@@ -11,17 +11,20 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-// Define constants for referrer URL, access token, and refresh token
 const (
 	BaseURL     = "https://admin.skydeck.ai"
 	ReferrerURL = "https://eastagile.skydeck.ai/"
 )
+
+type Config struct {
+	AccessToken  string
+	RefreshToken string
+}
 
 type SendMessagePayload struct {
 	Message             string `json:"message"`
@@ -67,28 +70,13 @@ Examples:
     sdchat -o "Hello, SkyDeck!"
 `,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
-		home, err := os.UserHomeDir()
+		config, err := loadConfig()
 		if err != nil {
-			return fmt.Errorf("error finding home directory: %w", err)
+			return err
 		}
 
-		viper.SetConfigName(".lazyai")
-		viper.SetConfigType("yaml")
-		viper.AddConfigPath(home)
-
-		if err := viper.ReadInConfig(); err != nil {
-			return fmt.Errorf("error reading config file: %w", err)
-		}
-
-		accessToken := viper.GetString("skydeck.accessToken")
-		refreshToken := viper.GetString("skydeck.refreshToken")
-
-		if accessToken == "" || refreshToken == "" {
-			return fmt.Errorf("accessToken and refreshToken must be set in the configuration file.\nPlease check your ~/.lazyai.yml again!\n")
-		}
-
-		cmd.Flags().String("accessToken", accessToken, "SkyDeck access token")
-		cmd.Flags().String("refreshToken", refreshToken, "SkyDeck refresh token")
+		cmd.Flags().String("accessToken", config.AccessToken, "SkyDeck access token")
+		cmd.Flags().String("refreshToken", config.RefreshToken, "SkyDeck refresh token")
 
 		return nil
 	},
@@ -117,8 +105,9 @@ Examples:
 			NonAI:               false,
 		}
 
-		// Send message
-		resp, err := sendMessage(payload, accessToken, refreshToken)
+		apiClient := NewAPIClient(accessToken, refreshToken)
+
+		resp, err := apiClient.sendMessage(payload)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error sending message: %v\n", err)
 			return
@@ -138,8 +127,7 @@ Examples:
 				fmt.Fprintf(os.Stderr, "Error opening URL: %v\n", err)
 			}
 		} else {
-			// Get streaming response
-			err = getStreamingResponse(resp.Data.AssistantMessageID, accessToken, refreshToken)
+			err = apiClient.getStreamingResponse(resp.Data.AssistantMessageID)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error getting streaming response: %v\n", err)
 				return
@@ -150,31 +138,67 @@ Examples:
 	},
 }
 
-func openURL(url string) error {
-	var err error
+// func main() {
+// 	if err := rootCmd.Execute(); err != nil {
+// 		fmt.Println(err)
+// 		os.Exit(1)
+// 	}
+// }
 
-	switch runtime.GOOS {
-	case "linux":
-		err = exec.Command("xdg-open", url).Start()
-	case "windows":
-		err = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
-	case "darwin":
-		err = exec.Command("open", url).Start()
-	default:
-		err = fmt.Errorf("unsupported platform")
+func loadConfig() (*Config, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("error finding home directory: %w", err)
 	}
 
-	return err
+	viper.SetConfigName(".lazyai")
+	viper.SetConfigType("yaml")
+	viper.AddConfigPath(home)
+
+	if err := viper.ReadInConfig(); err != nil {
+		return nil, fmt.Errorf("error reading config file: %w", err)
+	}
+
+	config := &Config{
+		AccessToken:  viper.GetString("skydeck.accessToken"),
+		RefreshToken: viper.GetString("skydeck.refreshToken"),
+	}
+
+	if config.AccessToken == "" || config.RefreshToken == "" {
+		return nil, fmt.Errorf("accessToken and refreshToken must be set in the configuration file.\nPlease check your ~/.lazyai.yml again!\n")
+	}
+
+	return config, nil
 }
 
-func sendMessage(payload SendMessagePayload, access, refresh string) (*SendMessageResponse, error) {
+func updateAccessToken(newAccessToken string) error {
+	viper.Set("skydeck.accessToken", newAccessToken)
+	return viper.WriteConfig()
+}
+
+type APIClient struct {
+	Client       *http.Client
+	AccessToken  string
+	RefreshToken string
+}
+
+func NewAPIClient(accessToken, refreshToken string) *APIClient {
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{Jar: jar}
+
+	return &APIClient{
+		Client:       client,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+	}
+}
+
+func (api *APIClient) sendMessage(payload SendMessagePayload) (*SendMessageResponse, error) {
 	url := BaseURL + "/api/v1/conversations/chat_v2/"
 
-	// Create a buffer to write our form data
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
-	// Add form fields
 	writer.WriteField("message", payload.Message)
 	writer.WriteField("model_id", fmt.Sprintf("%d", payload.ModelID))
 	if payload.ConversationID != nil {
@@ -183,10 +207,8 @@ func sendMessage(payload SendMessagePayload, access, refresh string) (*SendMessa
 	writer.WriteField("regenerate_message_id", fmt.Sprintf("%d", payload.RegenerateMessageID))
 	writer.WriteField("non_ai", fmt.Sprintf("%t", payload.NonAI))
 
-	// Close the writer to finalize the form data
 	writer.Close()
 
-	client := &http.Client{}
 	req, err := http.NewRequest("POST", url, &buf)
 	if err != nil {
 		return nil, err
@@ -194,56 +216,45 @@ func sendMessage(payload SendMessagePayload, access, refresh string) (*SendMessa
 
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("Referer", ReferrerURL)
+	req.AddCookie(&http.Cookie{Name: "eastagile_access", Value: api.AccessToken})
+	req.AddCookie(&http.Cookie{Name: "eastagile_refresh", Value: api.RefreshToken})
 
-	// Set cookies
-	cookieJar, _ := cookiejar.New(nil)
-	client.Jar = cookieJar
-	req.AddCookie(&http.Cookie{Name: "eastagile_access", Value: access})
-	req.AddCookie(&http.Cookie{Name: "eastagile_refresh", Value: refresh})
-
-	resp, err := client.Do(req)
+	resp, err := api.Client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	// If the status code is 401 Unauthorized, refresh the tokens and retry
 	if resp.StatusCode == http.StatusUnauthorized {
-		fmt.Println("Refreshing token....")
-		access, err = refreshTokens(refresh)
+		api.AccessToken, err = api.refreshTokens()
 		if err != nil {
 			return nil, fmt.Errorf("error refreshing tokens: %v", err)
 		}
 
-		// Retry the request with new tokens
-		req.AddCookie(&http.Cookie{Name: "eastagile_access", Value: access})
-		resp, err = client.Do(req)
+		req.AddCookie(&http.Cookie{Name: "eastagile_access", Value: api.AccessToken})
+		resp, err = api.Client.Do(req)
 		if err != nil {
 			return nil, err
 		}
 		defer resp.Body.Close()
 	}
 
-	// Check if the status code is not 200 OK
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("received non-200 response code: %d, body: %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	var sendMessageResponse SendMessageResponse
-	if err := json.NewDecoder(resp.Body).Decode(&sendMessageResponse); err != nil {
+	var response SendMessageResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("error decoding response: %v, body: %s", err, string(bodyBytes))
 	}
 
-	return &sendMessageResponse, nil
+	return &response, nil
 }
 
-func getStreamingResponse(messageID int, access, refresh string) error {
+func (api *APIClient) getStreamingResponse(messageID int) error {
 	url := BaseURL + fmt.Sprintf("/api/v1/conversations/streaming/?message_id=%d", messageID)
-	client := &http.Client{
-		Timeout: time.Second * 30,
-	}
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -251,61 +262,50 @@ func getStreamingResponse(messageID int, access, refresh string) error {
 	}
 
 	req.Header.Set("Referer", ReferrerURL)
+	req.AddCookie(&http.Cookie{Name: "eastagile_access", Value: api.AccessToken})
+	req.AddCookie(&http.Cookie{Name: "eastagile_refresh", Value: api.RefreshToken})
 
-	// Set cookies
-	cookieJar, _ := cookiejar.New(nil)
-	client.Jar = cookieJar
-	req.AddCookie(&http.Cookie{Name: "eastagile_access", Value: access})
-	req.AddCookie(&http.Cookie{Name: "eastagile_refresh", Value: refresh})
-
-	resp, err := client.Do(req)
+	resp, err := api.Client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
-	// If the status code is 401 Unauthorized, refresh the tokens and retry
 	if resp.StatusCode == http.StatusUnauthorized {
-		fmt.Println("Refreshing token....")
-		access, err = refreshTokens(refresh)
+		api.AccessToken, err = api.refreshTokens()
 		if err != nil {
 			return fmt.Errorf("error refreshing tokens: %v", err)
 		}
 
-		// Retry the request with new tokens
-		req.AddCookie(&http.Cookie{Name: "eastagile_access", Value: access})
-		resp, err = client.Do(req)
+		req.AddCookie(&http.Cookie{Name: "eastagile_access", Value: api.AccessToken})
+		resp, err = api.Client.Do(req)
 		if err != nil {
 			return err
 		}
 		defer resp.Body.Close()
 	}
 
-	// Check if the status code is not 200 OK
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("received non-200 response code: %d, body: %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	// Stream the response
 	_, err = io.Copy(os.Stdout, resp.Body)
-
 	return err
 }
 
-func refreshTokens(currentRefreshToken string) (string, error) {
+func (api *APIClient) refreshTokens() (string, error) {
 	url := BaseURL + "/api/v1/authentication/token/refresh/"
-	client := &http.Client{}
 
 	req, err := http.NewRequest(http.MethodPost, url, nil)
 	if err != nil {
 		return "", err
 	}
 
-	req.AddCookie(&http.Cookie{Name: "eastagile_refresh", Value: currentRefreshToken})
+	req.AddCookie(&http.Cookie{Name: "eastagile_refresh", Value: api.RefreshToken})
 	req.Header.Set("Referer", ReferrerURL)
 
-	resp, err := client.Do(req)
+	resp, err := api.Client.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -323,11 +323,26 @@ func refreshTokens(currentRefreshToken string) (string, error) {
 		}
 	}
 
-	// Update the tokens in the configuration
-	viper.Set("skydeck.accessToken", newAccess)
-	if err := viper.WriteConfig(); err != nil {
+	if err := updateAccessToken(newAccess); err != nil {
 		return "", fmt.Errorf("error writing config file: %v", err)
 	}
 
 	return newAccess, nil
+}
+
+func openURL(url string) error {
+	var err error
+
+	switch runtime.GOOS {
+	case "linux":
+		err = exec.Command("xdg-open", url).Start()
+	case "windows":
+		err = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	case "darwin":
+		err = exec.Command("open", url).Start()
+	default:
+		err = fmt.Errorf("unsupported platform")
+	}
+
+	return err
 }
