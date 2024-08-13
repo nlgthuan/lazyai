@@ -225,29 +225,51 @@ func (api *APIClient) sendMessage(payload SendMessagePayload) (*SendMessageRespo
 	}
 	defer resp.Body.Close()
 
+	var response SendMessageResponse
 	if resp.StatusCode == http.StatusUnauthorized {
 		api.AccessToken, err = api.refreshTokens()
 		if err != nil {
 			return nil, fmt.Errorf("error refreshing tokens: %v", err)
 		}
 
-		req.AddCookie(&http.Cookie{Name: "eastagile_access", Value: api.AccessToken})
-		resp, err = api.Client.Do(req)
+		var buf1 bytes.Buffer
+		writer1 := multipart.NewWriter(&buf1)
+
+		writer1.WriteField("message", payload.Message)
+		writer1.WriteField("model_id", fmt.Sprintf("%d", payload.ModelID))
+		if payload.ConversationID != nil {
+			writer1.WriteField("conversation_id", fmt.Sprintf("%d", *payload.ConversationID))
+		}
+		writer1.WriteField("regenerate_message_id", fmt.Sprintf("%d", payload.RegenerateMessageID))
+		writer1.WriteField("non_ai", fmt.Sprintf("%t", payload.NonAI))
+
+		writer1.Close()
+
+		req1, err := http.NewRequest("POST", url, &buf1)
 		if err != nil {
 			return nil, err
 		}
-		defer resp.Body.Close()
-	}
 
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("received non-200 response code: %d, body: %s", resp.StatusCode, string(bodyBytes))
-	}
+		req1.Header.Set("Content-Type", writer1.FormDataContentType())
+		req1.Header.Set("Referer", ReferrerURL)
+		req1.AddCookie(&http.Cookie{Name: "eastagile_access", Value: api.AccessToken})
+		req1.AddCookie(&http.Cookie{Name: "eastagile_refresh", Value: api.RefreshToken})
 
-	var response SendMessageResponse
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("error decoding response: %v, body: %s", err, string(bodyBytes))
+		resp1, err := api.Client.Do(req1)
+		if err != nil {
+			return nil, err
+		}
+		defer resp1.Body.Close()
+
+		if err := json.NewDecoder(resp1.Body).Decode(&response); err != nil {
+			bodyBytes, _ := io.ReadAll(resp1.Body)
+			return nil, fmt.Errorf("error decoding response1: %v, body: %s", err, string(bodyBytes))
+		}
+	} else {
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			return nil, fmt.Errorf("received non-200 response code: %d, body: %s", resp.StatusCode, string(bodyBytes))
+		}
 	}
 
 	return &response, nil
