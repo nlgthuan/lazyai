@@ -42,12 +42,6 @@ type SendMessageResponse struct {
 	} `json:"data"`
 }
 
-func init() {
-	rootCmd.AddCommand(sdchatCmd)
-	sdchatCmd.Flags().IntP("conversation", "c", 0, "Conversation ID to use for the message")
-	sdchatCmd.Flags().BoolP("open", "o", false, "Open the conversation in the default browser instead of streaming the response to the terminal")
-}
-
 var sdchatCmd = &cobra.Command{
 	Use:   "sdchat",
 	Short: "Send a message and get a streaming response from the server",
@@ -81,69 +75,15 @@ Examples:
 		return nil
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		accessToken, _ := cmd.Flags().GetString("accessToken")
-		refreshToken, _ := cmd.Flags().GetString("refreshToken")
-		conversationID, _ := cmd.Flags().GetInt("conversation")
-		openInBrowser, _ := cmd.Flags().GetBool("open")
-
-		if len(args) < 1 {
-			fmt.Println("Please provide a message to send")
-			return
-		}
-		message := args[0]
-
-		var conversationIDPtr *int
-		if conversationID != 0 {
-			conversationIDPtr = &conversationID
-		}
-
-		payload := SendMessagePayload{
-			Message:             message,
-			ModelID:             4094,
-			ConversationID:      conversationIDPtr,
-			RegenerateMessageID: -1,
-			NonAI:               false,
-		}
-
-		apiClient := NewAPIClient(accessToken, refreshToken)
-
-		resp, err := apiClient.sendMessage(payload)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error sending message: %v\n", err)
-			return
-		}
-
-		convoID := 0
-		if conversationID != 0 {
-			convoID = conversationID
-		} else {
-			convoID = resp.Data.ConversationID
-		}
-
-		conversationURL := fmt.Sprintf("https://eastagile.skydeck.ai/conversations/%d", convoID)
-
-		if openInBrowser {
-			if err := openURL(conversationURL); err != nil {
-				fmt.Fprintf(os.Stderr, "Error opening URL: %v\n", err)
-			}
-		} else {
-			err = apiClient.getStreamingResponse(resp.Data.AssistantMessageID)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error getting streaming response: %v\n", err)
-				return
-			}
-
-			fmt.Printf("\nVisit the conversation at: %s", conversationURL)
-		}
+		handleRun(cmd, args)
 	},
 }
 
-// func main() {
-// 	if err := rootCmd.Execute(); err != nil {
-// 		fmt.Println(err)
-// 		os.Exit(1)
-// 	}
-// }
+func init() {
+	rootCmd.AddCommand(sdchatCmd)
+	sdchatCmd.Flags().IntP("conversation", "c", 0, "Conversation ID to use for the message")
+	sdchatCmd.Flags().BoolP("open", "o", false, "Open the conversation in the default browser instead of streaming the response to the terminal")
+}
 
 func loadConfig() (*Config, error) {
 	home, err := os.UserHomeDir()
@@ -195,18 +135,10 @@ func NewAPIClient(accessToken, refreshToken string) *APIClient {
 
 func (api *APIClient) sendMessage(payload SendMessagePayload) (*SendMessageResponse, error) {
 	url := BaseURL + "/api/v1/conversations/chat_v2/"
-
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
-	writer.WriteField("message", payload.Message)
-	writer.WriteField("model_id", fmt.Sprintf("%d", payload.ModelID))
-	if payload.ConversationID != nil {
-		writer.WriteField("conversation_id", fmt.Sprintf("%d", *payload.ConversationID))
-	}
-	writer.WriteField("regenerate_message_id", fmt.Sprintf("%d", payload.RegenerateMessageID))
-	writer.WriteField("non_ai", fmt.Sprintf("%t", payload.NonAI))
-
+	writeFormFields(writer, payload)
 	writer.Close()
 
 	req, err := http.NewRequest("POST", url, &buf)
@@ -214,79 +146,131 @@ func (api *APIClient) sendMessage(payload SendMessagePayload) (*SendMessageRespo
 		return nil, err
 	}
 
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("Referer", ReferrerURL)
-	req.AddCookie(&http.Cookie{Name: "eastagile_access", Value: api.AccessToken})
-	req.AddCookie(&http.Cookie{Name: "eastagile_refresh", Value: api.RefreshToken})
-
+	setRequestHeaders(req, api.AccessToken, api.RefreshToken, writer.FormDataContentType())
 	resp, err := api.Client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
+	return handleResponse(resp, api, payload)
+}
+
+func writeFormFields(writer *multipart.Writer, payload SendMessagePayload) {
+	writer.WriteField("message", payload.Message)
+	writer.WriteField("model_id", fmt.Sprintf("%d", payload.ModelID))
+	if payload.ConversationID != nil {
+		writer.WriteField("conversation_id", fmt.Sprintf("%d", *payload.ConversationID))
+	}
+	writer.WriteField("regenerate_message_id", fmt.Sprintf("%d", payload.RegenerateMessageID))
+	writer.WriteField("non_ai", fmt.Sprintf("%t", payload.NonAI))
+}
+
+func setRequestHeaders(req *http.Request, accessToken, refreshToken, contentType string) {
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Referer", ReferrerURL)
+	req.AddCookie(&http.Cookie{Name: "eastagile_access", Value: accessToken})
+	req.AddCookie(&http.Cookie{Name: "eastagile_refresh", Value: refreshToken})
+}
+
+func handleResponse(resp *http.Response, api *APIClient, payload SendMessagePayload) (*SendMessageResponse, error) {
 	var response SendMessageResponse
 	if resp.StatusCode == http.StatusUnauthorized {
-		api.AccessToken, err = api.refreshTokens()
-		if err != nil {
-			return nil, fmt.Errorf("error refreshing tokens: %v", err)
-		}
+		return handleUnauthorizedResponse(api, payload)
+	}
 
-		var buf1 bytes.Buffer
-		writer1 := multipart.NewWriter(&buf1)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("received non-200 response code: %d, body: %s", resp.StatusCode, readResponseBody(resp))
+	}
 
-		writer1.WriteField("message", payload.Message)
-		writer1.WriteField("model_id", fmt.Sprintf("%d", payload.ModelID))
-		if payload.ConversationID != nil {
-			writer1.WriteField("conversation_id", fmt.Sprintf("%d", *payload.ConversationID))
-		}
-		writer1.WriteField("regenerate_message_id", fmt.Sprintf("%d", payload.RegenerateMessageID))
-		writer1.WriteField("non_ai", fmt.Sprintf("%t", payload.NonAI))
-
-		writer1.Close()
-
-		req1, err := http.NewRequest("POST", url, &buf1)
-		if err != nil {
-			return nil, err
-		}
-
-		req1.Header.Set("Content-Type", writer1.FormDataContentType())
-		req1.Header.Set("Referer", ReferrerURL)
-		req1.AddCookie(&http.Cookie{Name: "eastagile_access", Value: api.AccessToken})
-		req1.AddCookie(&http.Cookie{Name: "eastagile_refresh", Value: api.RefreshToken})
-
-		resp1, err := api.Client.Do(req1)
-		if err != nil {
-			return nil, err
-		}
-		defer resp1.Body.Close()
-
-		if err := json.NewDecoder(resp1.Body).Decode(&response); err != nil {
-			bodyBytes, _ := io.ReadAll(resp1.Body)
-			return nil, fmt.Errorf("error decoding response1: %v, body: %s", err, string(bodyBytes))
-		}
-	} else {
-		if resp.StatusCode != http.StatusOK {
-			bodyBytes, _ := io.ReadAll(resp.Body)
-			return nil, fmt.Errorf("received non-200 response code: %d, body: %s", resp.StatusCode, string(bodyBytes))
-		}
+	err := json.NewDecoder(resp.Body).Decode(&response)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding response: %v", err)
 	}
 
 	return &response, nil
 }
 
+func handleUnauthorizedResponse(api *APIClient, payload SendMessagePayload) (*SendMessageResponse, error) {
+	newAccessToken, err := api.refreshTokens()
+	if err != nil {
+		return nil, fmt.Errorf("error refreshing tokens: %v", err)
+	}
+	api.AccessToken = newAccessToken
+
+	return api.sendMessage(payload)
+}
+
+func readResponseBody(resp *http.Response) string {
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	return string(bodyBytes)
+}
+
+func handleRun(cmd *cobra.Command, args []string) {
+	accessToken, _ := cmd.Flags().GetString("accessToken")
+	refreshToken, _ := cmd.Flags().GetString("refreshToken")
+	conversationID, _ := cmd.Flags().GetInt("conversation")
+	openInBrowser, _ := cmd.Flags().GetBool("open")
+
+	if len(args) < 1 {
+		fmt.Println("Please provide a message to send")
+		return
+	}
+	message := args[0]
+
+	var conversationIDPtr *int
+	if conversationID != 0 {
+		conversationIDPtr = &conversationID
+	}
+
+	payload := SendMessagePayload{
+		Message:             message,
+		ModelID:             4094,
+		ConversationID:      conversationIDPtr,
+		RegenerateMessageID: -1,
+		NonAI:               false,
+	}
+
+	apiClient := NewAPIClient(accessToken, refreshToken)
+	resp, err := apiClient.sendMessage(payload)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error sending message: %v\n", err)
+		return
+	}
+
+	convoID := getConversationID(conversationID, resp)
+	conversationURL := fmt.Sprintf("https://eastagile.skydeck.ai/conversations/%d", convoID)
+
+	if openInBrowser {
+		if err := openURL(conversationURL); err != nil {
+			fmt.Fprintf(os.Stderr, "Error opening URL: %v\n", err)
+		}
+	} else {
+		err = apiClient.getStreamingResponse(resp.Data.AssistantMessageID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error getting streaming response: %v\n", err)
+			return
+		}
+
+		fmt.Printf("\nVisit the conversation at: %s", conversationURL)
+	}
+}
+
+func getConversationID(conversationID int, resp *SendMessageResponse) int {
+	if conversationID != 0 {
+		return conversationID
+	}
+	return resp.Data.ConversationID
+}
+
 func (api *APIClient) getStreamingResponse(messageID int) error {
 	url := BaseURL + fmt.Sprintf("/api/v1/conversations/streaming/?message_id=%d", messageID)
-
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
 
-	req.Header.Set("Referer", ReferrerURL)
-	req.AddCookie(&http.Cookie{Name: "eastagile_access", Value: api.AccessToken})
-	req.AddCookie(&http.Cookie{Name: "eastagile_refresh", Value: api.RefreshToken})
-
+	setRequestHeaders(req, api.AccessToken, api.RefreshToken, "")
 	resp, err := api.Client.Do(req)
 	if err != nil {
 		return err
@@ -308,8 +292,7 @@ func (api *APIClient) getStreamingResponse(messageID int) error {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("received non-200 response code: %d, body: %s", resp.StatusCode, string(bodyBytes))
+		return fmt.Errorf("received non-200 response code: %d, body: %s", resp.StatusCode, readResponseBody(resp))
 	}
 
 	_, err = io.Copy(os.Stdout, resp.Body)
@@ -318,7 +301,6 @@ func (api *APIClient) getStreamingResponse(messageID int) error {
 
 func (api *APIClient) refreshTokens() (string, error) {
 	url := BaseURL + "/api/v1/authentication/token/refresh/"
-
 	req, err := http.NewRequest(http.MethodPost, url, nil)
 	if err != nil {
 		return "", err
@@ -334,22 +316,19 @@ func (api *APIClient) refreshTokens() (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusNoContent {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("received non-200 response code: %d, body: %s", resp.StatusCode, string(bodyBytes))
+		return "", fmt.Errorf("received non-200 response code: %d, body: %s", resp.StatusCode, readResponseBody(resp))
 	}
 
-	var newAccess string
-	for _, cookie := range resp.Cookies() {
+	return extractAccessTokenFromCookies(resp.Cookies()), nil
+}
+
+func extractAccessTokenFromCookies(cookies []*http.Cookie) string {
+	for _, cookie := range cookies {
 		if cookie.Name == "eastagile_access" {
-			newAccess = cookie.Value
+			return cookie.Value
 		}
 	}
-
-	if err := updateAccessToken(newAccess); err != nil {
-		return "", fmt.Errorf("error writing config file: %v", err)
-	}
-
-	return newAccess, nil
+	return ""
 }
 
 func openURL(url string) error {
