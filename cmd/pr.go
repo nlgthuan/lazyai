@@ -82,8 +82,7 @@ func getGitDiff(baseBranch string) (string, error) {
 
 func printPRDescription(diff string) {
 	fmt.Println(`Help me generate PR description for the below git diff:
-<diff>
-` + diff + `</diff>
+` + "```" + diff + "```" + `
 
 Note that the format of the PR should follow this one:` + "```" + `
 ## Description

@@ -252,7 +252,7 @@ func handleRun(cmd *cobra.Command, args []string) {
 			return
 		}
 
-		fmt.Printf("\nVisit the conversation at: %s", conversationURL)
+		// fmt.Printf("\nVisit the conversation at: %s", conversationURL)
 	}
 }
 

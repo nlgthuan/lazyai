@@ -21,6 +21,7 @@ type Story struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
 	Desc string `json:"description"`
+	URL  string `json:"url"`
 }
 
 func (s Story) FilterValue() string {
@@ -76,6 +77,8 @@ Ensure your configuration file (~/.lazyai.yml) is set up properly with the follo
 		projectID, _ := cmd.Flags().GetString("projectID")
 		owner, _ := cmd.Flags().GetString("owner")
 
+		link, _ := cmd.Flags().GetBool("link")
+
 		// Make HTTP request to Pivotal Tracker API
 		baseURL := "https://www.pivotaltracker.com/services/v5/projects/" + projectID + "/stories"
 		queryParams := url.Values{}
@@ -115,7 +118,11 @@ Ensure your configuration file (~/.lazyai.yml) is set up properly with the follo
 		myOptions := make([]huh.Option[string], len(stories))
 
 		for i, story := range stories {
-			myOptions[i] = huh.NewOption(story.Name, story.Desc)
+			if link != true {
+				myOptions[i] = huh.NewOption(story.Name, story.Desc)
+			} else {
+				myOptions[i] = huh.NewOption(story.Name, story.URL)
+			}
 		}
 
 		var desc string
@@ -135,4 +142,5 @@ Ensure your configuration file (~/.lazyai.yml) is set up properly with the follo
 
 func init() {
 	rootCmd.AddCommand(pickPTCmd)
+	pickPTCmd.Flags().BoolP("link", "l", false, "Returns only the link of the story")
 }
