@@ -263,14 +263,29 @@ func getConversationID(conversationID int, resp *SendMessageResponse) int {
 	return resp.Data.ConversationID
 }
 
+type StreamingReq struct {
+	MessageID int `json:"message_id"`
+}
+
 func (api *APIClient) getStreamingResponse(messageID int) error {
-	url := BaseURL + fmt.Sprintf("/api/v1/conversations/streaming/?message_id=%d", messageID)
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return err
+	url := BaseURL + fmt.Sprintf("/api/v1/conversations/streaming/")
+
+	payload := StreamingReq{
+		MessageID: messageID,
 	}
 
-	setRequestHeaders(req, api.AccessToken, api.RefreshToken, "")
+	jsonPayload, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %v", err)
+	}
+
+	setRequestHeaders(req, api.AccessToken, api.RefreshToken, "application/json")
+
 	resp, err := api.Client.Do(req)
 	if err != nil {
 		return err
