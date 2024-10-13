@@ -63,7 +63,7 @@ else
 
     prompt=$(generate_prompt "$changes")
 
-    ai_res=$(lazyai sdchat "$prompt")
+    ai_res=$(lazyai sdchat "$prompt" -n)
 
     if [ "$skip_story" = false ]; then
         commit_msg=$(echo "${commit_type} ${story_id} - ${ai_res}\n${story_url}")
