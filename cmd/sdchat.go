@@ -314,6 +314,8 @@ func (api *APIClient) getStreamingResponse(messageID int) error {
 			return fmt.Errorf("error refreshing tokens: %v", err)
 		}
 
+		updateAccessToken(api.AccessToken)
+
 		req.AddCookie(&http.Cookie{Name: "eastagile_access", Value: api.AccessToken})
 		resp, err = api.Client.Do(req)
 		if err != nil {
