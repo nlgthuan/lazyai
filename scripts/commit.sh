@@ -15,16 +15,21 @@ get_git_diff() {
 generate_prompt() {
     local changes="$1"
 
-    prompt="Please generate descriptive commit message for the following changes:\n\n$changes\n\n Just output the commit message, do not wrap it in anything.
-    \n
-    The first line of the commit message should be a concise name for the commit. \n
-    Then in the body, we provide more context about the change in form of list, start with a dash. \n
-    For example: \n
+    prompt="Please generate descriptive commit message for the following changes:
 
-        This is a concise name of the commit \n\n
-        - Add a new user model\n
-        - Refactor views\n
-    "
+$changes
+
+Just output the commit message, do not wrap it in anything.
+
+The first line of the commit message should be a concise name for the commit.
+Then in the body, we provide more context about the change in form of list, start with a dash.
+For example:
+
+This is a concise name of the commit
+
+- Add a new user model
+- Refactor views
+"
     echo "$prompt"
 }
 
@@ -57,8 +62,8 @@ else
     fi
 
     prompt=$(generate_prompt "$changes")
-    echo "$prompt"
-    ai_res=$(printf "%s" "$prompt" | xargs -0 -I {} lazyai sdchat "{}")
+
+    ai_res=$(lazyai sdchat "$prompt")
 
     if [ "$skip_story" = false ]; then
         commit_msg=$(echo "${commit_type} ${story_id} - ${ai_res}\n${story_url}")

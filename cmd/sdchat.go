@@ -24,6 +24,7 @@ const (
 type Config struct {
 	AccessToken  string
 	RefreshToken string
+	ConvoID      int
 }
 
 type SendMessagePayload struct {
@@ -71,6 +72,7 @@ Examples:
 
 		cmd.Flags().String("accessToken", config.AccessToken, "SkyDeck access token")
 		cmd.Flags().String("refreshToken", config.RefreshToken, "SkyDeck refresh token")
+		cmd.Flags().Int("convoID", config.ConvoID, "Current conversation ID")
 
 		return nil
 	},
@@ -83,6 +85,7 @@ func init() {
 	rootCmd.AddCommand(sdchatCmd)
 	sdchatCmd.Flags().IntP("conversation", "c", 0, "Conversation ID to use for the message")
 	sdchatCmd.Flags().BoolP("open", "o", false, "Open the conversation in the default browser instead of streaming the response to the terminal")
+	sdchatCmd.Flags().BoolP("new", "n", false, "Chat in a new conversation")
 }
 
 func loadConfig() (*Config, error) {
@@ -102,6 +105,7 @@ func loadConfig() (*Config, error) {
 	config := &Config{
 		AccessToken:  viper.GetString("skydeck.accessToken"),
 		RefreshToken: viper.GetString("skydeck.refreshToken"),
+		ConvoID:      viper.GetInt("skydeck.convoID"),
 	}
 
 	if config.AccessToken == "" || config.RefreshToken == "" {
@@ -208,19 +212,29 @@ func readResponseBody(resp *http.Response) string {
 
 func handleRun(cmd *cobra.Command, args []string) {
 	accessToken, _ := cmd.Flags().GetString("accessToken")
+	currentConvoID, _ := cmd.Flags().GetInt("convoID")
 	refreshToken, _ := cmd.Flags().GetString("refreshToken")
 	conversationID, _ := cmd.Flags().GetInt("conversation")
 	openInBrowser, _ := cmd.Flags().GetBool("open")
+	newConvo, _ := cmd.Flags().GetBool("new")
 
 	if len(args) < 1 {
 		fmt.Println("Please provide a message to send")
 		return
 	}
+
 	message := args[0]
 
+	// Handle conversation
 	var conversationIDPtr *int
+	if currentConvoID != 0 {
+		conversationIDPtr = &currentConvoID
+	}
 	if conversationID != 0 {
 		conversationIDPtr = &conversationID
+	}
+	if newConvo {
+		conversationIDPtr = nil
 	}
 
 	payload := SendMessagePayload{
@@ -239,6 +253,8 @@ func handleRun(cmd *cobra.Command, args []string) {
 	}
 
 	convoID := getConversationID(conversationID, resp)
+	viper.Set("skydeck.convoID", convoID)
+	viper.WriteConfig()
 	conversationURL := fmt.Sprintf("https://eastagile.skydeck.ai/conversations/%d", convoID)
 
 	if openInBrowser {
