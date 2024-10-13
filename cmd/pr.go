@@ -100,10 +100,5 @@ This Pull Request introduces several key functionalities aimed at enhancing the 
 3. **Additional Updates**:
    - Added tests for new models, views, and middleware to ensure robust functionality.
    - Updated styling and templates to improve user experience during the signup and verification process.
-
-## Related Stories
-
-- [429 - As a user, I can sign up for Control Center using email and password](https://www.pivotaltracker.com/story/show/187954429)
-- [451 - Restrict CC access until SMS verification is completed](https://www.pivotaltracker.com/story/show/187975451)
 ` + "```")
 }
