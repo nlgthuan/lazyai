@@ -1,0 +1,3 @@
+#!/bin/bash
+
+prompt -p commit | lazyai sdchat -n | sponge | vipe | git commit -F -

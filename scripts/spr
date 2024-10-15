@@ -1,0 +1,3 @@
+#!/bin/bash
+
+prompt -p pr | lazyai sdchat -n | sponge | vipe | xargs -0 -I {} gh pr create -f -b "{}"
