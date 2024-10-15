@@ -48,7 +48,7 @@ function pr_template() {
     cat <<EOF
 Help me generate PR description for the below git diff:
 \`\`\`diff
-
+$(git diff main)
 \`\`\`
 
 Note that the format of the PR should follow this one:
@@ -59,7 +59,7 @@ This Pull Request introduces several key functionalities aimed at enhancing the 
 
 ## Summary of Changes
 1. **Email and Password Signup for Control Center**:
-   - Configured necessary settings in` + "`settings.py`" + `for handling signups.
+   - Configured necessary settings in \`settings.py\` for handling signups.
    - Updated the signup template to include terms of use and privacy policy agreements.
 
 2. **Restrict Access Until SMS Verification**:
