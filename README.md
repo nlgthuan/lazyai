@@ -1,4 +1,3 @@
-```markdown
 # LazyAI
 
 LazyAI is a command-line interface (CLI) tool designed to streamline your development workflow by integrating with AI services and project management tools. It helps you effortlessly generate commit messages, pull request descriptions, and interact with AI models.
@@ -71,4 +70,4 @@ Contributions are welcome! Feel free to submit a pull request or report any issu
 ## License
 
 This project is licensed under the MIT License.
-```
+
