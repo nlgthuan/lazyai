@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -218,12 +219,28 @@ func handleRun(cmd *cobra.Command, args []string) {
 	openInBrowser, _ := cmd.Flags().GetBool("open")
 	newConvo, _ := cmd.Flags().GetBool("new")
 
-	if len(args) < 1 {
-		fmt.Println("Please provide a message to send")
+	var message string
+	var err error
+
+	// Check if there is data coming from stdin
+	if stat, err := os.Stdin.Stat(); err == nil && (stat.Mode()&os.ModeCharDevice) == 0 {
+		// Read from standard input
+		inputBytes, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading from stdin: %v\n", err)
+			return
+		}
+		message = string(inputBytes)
+	} else if len(args) > 0 {
+		// Use the first argument as the message
+		message = args[0]
+	} else {
+		fmt.Println("Please provide a message to send either as an argument or through stdin")
 		return
 	}
 
-	message := args[0]
+	// Trim message to remove any trailing newlines or spaces
+	message = strings.TrimSpace(message)
 
 	// Handle conversation
 	var conversationIDPtr *int
@@ -267,8 +284,6 @@ func handleRun(cmd *cobra.Command, args []string) {
 			fmt.Fprintf(os.Stderr, "Error getting streaming response: %v\n", err)
 			return
 		}
-
-		// fmt.Printf("\nVisit the conversation at: %s", conversationURL)
 	}
 }
 
