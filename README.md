@@ -20,7 +20,7 @@ LazyAI requires a configuration file to store API tokens and other necessary set
 skydeck:
   accessToken: <your_access_token>
   refreshToken: <your_refresh_token>
-  convoID: <default_conversation_id>
+  convoID: 0
 
 pivotalTracker:
   apiToken: <your_api_token>
