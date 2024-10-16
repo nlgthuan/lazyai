@@ -10,7 +10,7 @@ To install LazyAI, you need to have Go installed on your machine. Once you have 
 go install github.com/nlgtEA/lazyai@latest
 ```
 
-Make sure your `$GOPATH/bin` is added to your system's `$PATH` so you can run the `lazyai` command from anywhere.
+Make sure your `~/go/bin` is added to your system's `$PATH` so you can run the `lazyai` command from anywhere.
 
 ## Configuration
 
