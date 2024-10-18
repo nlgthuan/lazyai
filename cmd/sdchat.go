@@ -22,12 +22,6 @@ const (
 	ReferrerURL = "https://eastagile.skydeck.ai/"
 )
 
-type Config struct {
-	AccessToken  string
-	RefreshToken string
-	ConvoID      int
-}
-
 type SendMessagePayload struct {
 	Message             string `json:"message"`
 	ModelID             int    `json:"model_id"`
@@ -43,6 +37,19 @@ type SendMessageResponse struct {
 		RememberizerAPIQuery map[string]interface{} `json:"rememberizer_api_query"`
 	} `json:"data"`
 }
+
+type Config struct {
+	accessToken    string
+	currentConvoID int
+	refreshToken   string
+}
+
+var (
+	config         *Config
+	conversationID int
+	openInBrowser  bool
+	newConvo       bool
+)
 
 var sdchatCmd = &cobra.Command{
 	Use:   "sdchat",
@@ -65,55 +72,39 @@ Examples:
     # Send a message and open the conversation in the default browser
     sdchat -o "Hello, SkyDeck!"
 `,
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		config, err := loadConfig()
-		if err != nil {
-			return err
-		}
-
-		cmd.Flags().String("accessToken", config.AccessToken, "SkyDeck access token")
-		cmd.Flags().String("refreshToken", config.RefreshToken, "SkyDeck refresh token")
-		cmd.Flags().Int("convoID", config.ConvoID, "Current conversation ID")
-
-		return nil
-	},
 	Run: func(cmd *cobra.Command, args []string) {
 		handleRun(cmd, args)
 	},
 }
 
 func init() {
+	cobra.OnInitialize(loadConfig)
+
+	sdchatCmd.Flags().IntVarP(&conversationID, "conversation", "c", 0, "Conversation ID to use for the message")
+	sdchatCmd.Flags().BoolVarP(&openInBrowser, "open", "o", false, "Open the conversation in the default browser instead of streaming the response to the terminal")
+	sdchatCmd.Flags().BoolVarP(&newConvo, "new", "n", false, "Chat in a new conversation")
+
 	rootCmd.AddCommand(sdchatCmd)
-	sdchatCmd.Flags().IntP("conversation", "c", 0, "Conversation ID to use for the message")
-	sdchatCmd.Flags().BoolP("open", "o", false, "Open the conversation in the default browser instead of streaming the response to the terminal")
-	sdchatCmd.Flags().BoolP("new", "n", false, "Chat in a new conversation")
 }
 
-func loadConfig() (*Config, error) {
+func loadConfig() {
 	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("error finding home directory: %w", err)
-	}
+	cobra.CheckErr(err)
 
 	viper.SetConfigName(".lazyai")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(home)
 
-	if err := viper.ReadInConfig(); err != nil {
-		return nil, fmt.Errorf("error reading config file: %w", err)
-	}
+	viper.AutomaticEnv()
 
-	config := &Config{
-		AccessToken:  viper.GetString("skydeck.accessToken"),
-		RefreshToken: viper.GetString("skydeck.refreshToken"),
-		ConvoID:      viper.GetInt("skydeck.convoID"),
-	}
+	err = viper.ReadInConfig()
+	cobra.CheckErr(err)
 
-	if config.AccessToken == "" || config.RefreshToken == "" {
-		return nil, fmt.Errorf("accessToken and refreshToken must be set in the configuration file.\nPlease check your ~/.lazyai.yml again!\n")
+	config = &Config{
+		accessToken:    viper.GetString("skydeck.accessToken"),
+		refreshToken:   viper.GetString("skydeck.refreshToken"),
+		currentConvoID: viper.GetInt("skydeck.convoID"),
 	}
-
-	return config, nil
 }
 
 func updateAccessToken(newAccessToken string) error {
@@ -212,13 +203,6 @@ func readResponseBody(resp *http.Response) string {
 }
 
 func handleRun(cmd *cobra.Command, args []string) {
-	accessToken, _ := cmd.Flags().GetString("accessToken")
-	currentConvoID, _ := cmd.Flags().GetInt("convoID")
-	refreshToken, _ := cmd.Flags().GetString("refreshToken")
-	conversationID, _ := cmd.Flags().GetInt("conversation")
-	openInBrowser, _ := cmd.Flags().GetBool("open")
-	newConvo, _ := cmd.Flags().GetBool("new")
-
 	var message string
 	var err error
 
@@ -244,8 +228,8 @@ func handleRun(cmd *cobra.Command, args []string) {
 
 	// Handle conversation
 	var conversationIDPtr *int
-	if currentConvoID != 0 {
-		conversationIDPtr = &currentConvoID
+	if config.currentConvoID != 0 {
+		conversationIDPtr = &config.currentConvoID
 	}
 	if conversationID != 0 {
 		conversationIDPtr = &conversationID
@@ -262,7 +246,7 @@ func handleRun(cmd *cobra.Command, args []string) {
 		NonAI:               false,
 	}
 
-	apiClient := NewAPIClient(accessToken, refreshToken)
+	apiClient := NewAPIClient(config.accessToken, config.refreshToken)
 	resp, err := apiClient.sendMessage(payload)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error sending message: %v\n", err)
