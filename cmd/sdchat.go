@@ -32,9 +32,13 @@ type SendMessagePayload struct {
 
 type SendMessageResponse struct {
 	Data struct {
-		ConversationID       int                    `json:"conversation_id"`
-		AssistantMessageID   int                    `json:"assistant_message_id"`
-		RememberizerAPIQuery map[string]interface{} `json:"rememberizer_api_query"`
+		ConversationID int `json:"conversation_id"`
+		Messages       []struct {
+			ID        int    `json:"id"`
+			Type      string `json:"type"`
+			Content   string `json:"content"`
+			Streaming bool   `json:"streaming"`
+		} `json:"messages"`
 	} `json:"data"`
 }
 
@@ -263,7 +267,21 @@ func handleRun(cmd *cobra.Command, args []string) {
 			fmt.Fprintf(os.Stderr, "Error opening URL: %v\n", err)
 		}
 	} else {
-		err = apiClient.getStreamingResponse(resp.Data.AssistantMessageID)
+		// Find the assistant message ID in the response
+		var assistantMessageID int
+		for _, msg := range resp.Data.Messages {
+			if msg.Type == "assistant" && msg.Streaming {
+				assistantMessageID = msg.ID
+				break
+			}
+		}
+		
+		if assistantMessageID == 0 {
+			fmt.Fprintf(os.Stderr, "Error: No streaming assistant message found in the response\n")
+			return
+		}
+		
+		err = apiClient.getStreamingResponse(assistantMessageID)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error getting streaming response: %v\n", err)
 			return
@@ -280,6 +298,18 @@ func getConversationID(conversationID int, resp *SendMessageResponse) int {
 
 type StreamingReq struct {
 	MessageID int `json:"message_id"`
+}
+
+type StreamingResponse struct {
+	Data struct {
+		ConversationID int `json:"conversation_id"`
+		Messages       []struct {
+			ID        int    `json:"id"`
+			Type      string `json:"type"`
+			Content   string `json:"content"`
+			Streaming bool   `json:"streaming"`
+		} `json:"messages"`
+	} `json:"data"`
 }
 
 func (api *APIClient) getStreamingResponse(messageID int) error {
@@ -327,8 +357,30 @@ func (api *APIClient) getStreamingResponse(messageID int) error {
 		return fmt.Errorf("received non-200 response code: %d, body: %s", resp.StatusCode, readResponseBody(resp))
 	}
 
-	_, err = io.Copy(os.Stdout, resp.Body)
-	return err
+	// The response might be the raw streaming content directly
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %v", err)
+	}
+	
+	bodyStr := string(bodyBytes)
+	
+	// Try to decode as JSON first
+	var streamResp StreamingResponse
+	if err := json.Unmarshal(bodyBytes, &streamResp); err == nil {
+		// If successful JSON decode, find the assistant message
+		for _, msg := range streamResp.Data.Messages {
+			if msg.Type == "assistant" && msg.Streaming {
+				fmt.Print(msg.Content)
+				return nil
+			}
+		}
+		return fmt.Errorf("no streaming assistant message found in the response")
+	}
+	
+	// If not valid JSON, output the raw response as it's likely the streamed content
+	fmt.Print(bodyStr)
+	return nil
 }
 
 func (api *APIClient) refreshTokens() (string, error) {
